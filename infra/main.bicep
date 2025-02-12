@@ -15,6 +15,9 @@ param virtualNetworkAddressSpacePrefix string = '10.1.0.0/16'
 param virtualNetworkIntegrationSubnetAddressSpacePrefix string = '10.1.1.0/24'
 param virtualNetworkPrivateEndpointSubnetAddressSpacePrefix string = '10.1.2.0/24'
 
+param functionMaxInstanceCount int = 100
+param functionInstanceMemoryMB int = 2048
+
 // AZD will set AZURE_PRINCIPAL_ID to the principal ID of the user executing the deployment (identity of the logged in user of AZD).
 @description('The principal ID of the user to assign application roles.')
 param principalId string = ''
@@ -45,7 +48,9 @@ var virtualNetworkPrivateEndpointSubnetName = '${abbrs.networkVirtualNetworksSub
 
 var eventHubConsumerGroupName = 'widgetfunctionconsumergroup'
 var functionAppName = '${abbrs.webSitesFunctions}${resourceToken}'
-var storageSecretName = 'storage-connection-string'
+// var storageSecretName = 'storage-connection-string'
+
+var deploymentStorageContainerName = 'app-package-${take(functionAppName, 32)}-${take(resourceToken, 7)}'
 
 resource rg 'Microsoft.Resources/resourceGroups@2022-09-01' = {
   name: 'rg-${environmentName}'
@@ -53,11 +58,11 @@ resource rg 'Microsoft.Resources/resourceGroups@2022-09-01' = {
   tags: tags
 }
 
-@description('This is the built-in role definition for the Key Vault Secret User role. See https://learn.microsoft.com/azure/role-based-access-control/built-in-roles#key-vault-secrets-user for more information.')
-resource keyVaultSecretUserRoleDefintion 'Microsoft.Authorization/roleDefinitions@2022-04-01' existing = {
-  scope: subscription()
-  name: '4633458b-17de-408a-b874-0445c86b69e6'
-}
+// @description('This is the built-in role definition for the Key Vault Secret User role. See https://learn.microsoft.com/azure/role-based-access-control/built-in-roles#key-vault-secrets-user for more information.')
+// resource keyVaultSecretUserRoleDefintion 'Microsoft.Authorization/roleDefinitions@2022-04-01' existing = {
+//   scope: subscription()
+//   name: '4633458b-17de-408a-b874-0445c86b69e6'
+// }
 
 @description('This is the built-in role definition for the Azure Event Hubs Data Receiver role. See https://learn.microsoft.com/azure/role-based-access-control/built-in-roles#azure-event-hubs-data-receiver for more information.')
 resource eventHubDataReceiverUserRoleDefintion 'Microsoft.Authorization/roleDefinitions@2022-04-01' existing = {
@@ -83,7 +88,7 @@ module storageRoleAssignment 'core/security/role.bicep' = {
   name: 'storageRoleAssignment'
   scope: rg
   params: {
-    principalId: functionApp.outputs.identityPrincipalId
+    principalId: flexFunction.outputs.identityPrincipalId
     roleDefinitionId: storageBlobDataOwnerRoleDefinition.name
     principalType: 'ServicePrincipal'
   }
@@ -93,7 +98,7 @@ module eventHubReceiverRoleAssignment 'core/security/role.bicep' = {
   name: 'eventHubReceiverRoleAssignment'
   scope: rg
   params: {
-    principalId: functionApp.outputs.identityPrincipalId
+    principalId: flexFunction.outputs.identityPrincipalId
     roleDefinitionId: eventHubDataReceiverUserRoleDefintion.name
     principalType: 'ServicePrincipal'
   }
@@ -103,7 +108,7 @@ module eventHubSenderRoleAssignment 'core/security/role.bicep' = {
   name: 'eventHubSenderRoleAssignment'
   scope: rg
   params: {
-    principalId: functionApp.outputs.identityPrincipalId
+    principalId: flexFunction.outputs.identityPrincipalId
     roleDefinitionId: eventHubDataSenderUserRoleDefintion.name
     principalType: 'ServicePrincipal'
   }
@@ -131,39 +136,52 @@ module eventHubSenderRoleUserAssignment 'core/security/role.bicep' = if (!empty(
   }
 }
 
-module keyVaultRoleAssignment 'core/security/role.bicep' = {
-  name: 'keyVaultRoleAssignment'
+// module keyVaultRoleAssignment 'core/security/role.bicep' = {
+//   name: 'keyVaultRoleAssignment'
+//   scope: rg
+//   params: {
+//     principalId: functionApp.outputs.identityPrincipalId
+//     roleDefinitionId: keyVaultSecretUserRoleDefintion.name
+//     principalType: 'ServicePrincipal'
+//   }
+// }
+
+module monitoring './core/monitor/monitoring.bicep' = {
+  name: 'monitoring'
   scope: rg
   params: {
-    principalId: functionApp.outputs.identityPrincipalId
-    roleDefinitionId: keyVaultSecretUserRoleDefintion.name
-    principalType: 'ServicePrincipal'
-  }
-}
-
-module logAnalytics './core/monitor/loganalytics.bicep' = {
-  name: 'logAnalytics'
-  scope: rg
-  params: {
-    name: '${abbrs.operationalInsightsWorkspaces}${resourceToken}'
-    location: location
-    tags: tags
-  }
-}
-
-module appInsights './core/monitor/applicationinsights.bicep' = {
-  name: 'applicationInsights'
-  scope: rg
-  params: {
-    name: '${abbrs.insightsComponents}${resourceToken}'
-    tags: tags
-
+    logAnalyticsName: '${abbrs.operationalInsightsWorkspaces}${resourceToken}'
+    applicationInsightsName: '${abbrs.insightsComponents}${resourceToken}'
+    applicationInsightsDashboardName: ''
     includeDashboard: false
-    dashboardName: ''
-    logAnalyticsWorkspaceId: logAnalytics.outputs.id
     location: location
+    tags: tags
   }
 }
+
+// module logAnalytics './core/monitor/loganalytics.bicep' = {
+//   name: 'logAnalytics'
+//   scope: rg
+//   params: {
+//     name: '${abbrs.operationalInsightsWorkspaces}${resourceToken}'
+//     location: location
+//     tags: tags
+//   }
+// }
+
+// module appInsights './core/monitor/applicationinsights.bicep' = {
+//   name: 'applicationInsights'
+//   scope: rg
+//   params: {
+//     name: '${abbrs.insightsComponents}${resourceToken}'
+//     tags: tags
+
+//     includeDashboard: false
+//     dashboardName: ''
+//     logAnalyticsWorkspaceId: logAnalytics.outputs.id
+//     location: location
+//   }
+// }
 
 module storage './core/storage/storage-account.bicep' = {
   name: 'storage'
@@ -173,15 +191,15 @@ module storage './core/storage/storage-account.bicep' = {
     location: location
     tags: tags
 
-    fileShares: [
-      {
-        name: functionAppName
-      }
-    ]
+    // fileShares: [
+    //   {
+    //     name: functionAppName
+    //   }
+    // ]
 
     // Set the key vault name to set the connection string as a secret in the key vault.
-    keyVaultName: keyVault.outputs.name
-    keyVaultSecretName: storageSecretName
+    // keyVaultName: keyVault.outputs.name
+    // keyVaultSecretName: storageSecretName
 
     useVirtualNetworkPrivateEndpoint: useVirtualNetworkPrivateEndpoint
   }
@@ -211,17 +229,35 @@ module eventHub './core/messaging/event-hub.bicep' = {
   }
 }
 
-module keyVault 'core/security/keyvault.bicep' = {
-  name: 'keyVault'
+module flexFunction 'core/host/function.bicep' = {
+  name: 'flexFunction'
   scope: rg
   params: {
-    name: '${abbrs.keyVaultVaults}${resourceToken}'
     location: location
     tags: tags
-    enabledForRbacAuthorization: true
-    useVirtualNetworkPrivateEndpoint: useVirtualNetworkPrivateEndpoint
+    applicationInsightsName: monitoring.outputs.applicationInsightsName
+    storageAccountName: storage.outputs.name
+    appName: functionAppName
+    deploymentStorageContainerName: deploymentStorageContainerName
+    planName: '${abbrs.webServerFarms}${resourceToken}'
+    functionAppRuntime: 'dotnet-isolated'
+    functionAppRuntimeVersion: '9.0'
+    instanceMemoryMB: functionInstanceMemoryMB
+    maximumInstanceCount: functionMaxInstanceCount
   }
 }
+
+// module keyVault 'core/security/keyvault.bicep' = {
+//   name: 'keyVault'
+//   scope: rg
+//   params: {
+//     name: '${abbrs.keyVaultVaults}${resourceToken}'
+//     location: location
+//     tags: tags
+//     enabledForRbacAuthorization: true
+//     useVirtualNetworkPrivateEndpoint: useVirtualNetworkPrivateEndpoint
+//   }
+// }
 
 module integrationSubnetNsg 'core/networking/network-security-group.bicep' = if (useVirtualNetwork) {
   name: 'integrationSubnetNsg'
@@ -284,80 +320,79 @@ module networking 'core/networking/private-networking.bicep' = if (useVirtualNet
   params: {
     location: location
     eventHubNamespaceName: eventHubNamespace.outputs.eventHubNamespaceName
-    keyVaultName: keyVault.outputs.name
+    // keyVaultName: keyVault.outputs.name
     storageAccoutnName: storage.outputs.name
-    functionName: functionApp.outputs.name
+    functionName: flexFunction.outputs.name
     virtualNetworkIntegrationSubnetName: virtualNetworkIntegrationSubnetName
     virtualNetworkName: virtualNetworkName
     virtualNetworkPrivateEndpointSubnetName: virtualNetworkPrivateEndpointSubnetName
   }
 }
 
-module functionPlan 'core/host/functionplan.bicep' = {
-  name: 'functionPlan'
-  scope: rg
-  params: {
-    location: location
-    tags: tags
-    OperatingSystem: 'Linux'
-    name: '${abbrs.webServerFarms}${resourceToken}'
-    planSku: 'EP1'
-  }
-}
+// module functionPlan 'core/host/functionplan.bicep' = {
+//   name: 'functionPlan'
+//   scope: rg
+//   params: {
+//     location: location
+//     tags: tags
+//     OperatingSystem: 'Linux'
+//     name: '${abbrs.webServerFarms}${resourceToken}'
+//     planSku: 'EP1'
+//   }
+// }
 
-module functionApp 'core/host/functions.bicep' = {
-  name: 'functionApp'
-  scope: rg
-  params: {
-    location: location
-    tags: union(tags, { 'azd-service-name': 'event-consumer-func' })
-    name: functionAppName
-    appServicePlanId: functionPlan.outputs.planId
-    keyVaultName: keyVault.outputs.name
-    storageKeyVaultSecretName: storageSecretName
-    managedIdentity: true // creates a system assigned identity
-    functionsWorkerRuntime: 'dotnet'
-    runtimeName: 'dotnetcore'
-    runtimeVersion: '6.0'
-    extensionVersion: '~4'
-    storageAccountName: storage.outputs.name
-    vnetRouteAllEnabled: true
-    kind: 'functionapp,linux'
-    alwaysOn: false
-    enableOryxBuild: false
-    scmDoBuildDuringDeployment: false
-    functionsRuntimeScaleMonitoringEnabled: true
-    applicationInsightsName: appInsights.outputs.name
-    virtualNetworkIntegrationSubnetId: useVirtualNetworkIntegration ? vnet.outputs.virtualNetworkSubnets[0].id : ''
-    appSettings: {
-      EVENTHUB_CONNECTION__fullyQualifiedNamespace: '${eventHubNamespace.outputs.eventHubNamespaceName}.servicebus.windows.net'
-      EVENTHUB_NAME: eventHub.outputs.EventHubName
-      EVENTHUB_CONSUMER_GROUP_NAME: eventHub.outputs.EventHubConsumerGroupName
+// module functionApp 'core/host/functions.bicep' = {
+//   name: 'functionApp'
+//   scope: rg
+//   params: {
+//     location: location
+//     tags: union(tags, { 'azd-service-name': 'event-consumer-func' })
+//     name: functionAppName
+//     appServicePlanId: functionPlan.outputs.planId
+//     keyVaultName: keyVault.outputs.name
+//     storageKeyVaultSecretName: storageSecretName
+//     managedIdentity: true // creates a system assigned identity
+//     functionsWorkerRuntime: 'dotnet'
+//     runtimeName: 'dotnetcore'
+//     runtimeVersion: '6.0'
+//     extensionVersion: '~4'
+//     storageAccountName: storage.outputs.name
+//     vnetRouteAllEnabled: true
+//     kind: 'functionapp,linux'
+//     alwaysOn: false
+//     enableOryxBuild: false
+//     scmDoBuildDuringDeployment: false
+//     functionsRuntimeScaleMonitoringEnabled: true
+//     applicationInsightsName: monitoring.outputs.applicationInsightsName //appInsights.outputs.name
+//     virtualNetworkIntegrationSubnetId: useVirtualNetworkIntegration ? vnet.outputs.virtualNetworkSubnets[0].id : ''
+//     appSettings: {
+//       EVENTHUB_CONNECTION__fullyQualifiedNamespace: '${eventHubNamespace.outputs.eventHubNamespaceName}.servicebus.windows.net'
+//       EVENTHUB_NAME: eventHub.outputs.EventHubName
+//       EVENTHUB_CONSUMER_GROUP_NAME: eventHub.outputs.EventHubConsumerGroupName
 
-      // Needed for EP plans
-      WEBSITE_CONTENTSHARE: functionAppName
-      WEBSITE_CONTENTAZUREFILECONNECTIONSTRING: '@Microsoft.KeyVault(VaultName=${keyVault.outputs.name};SecretName=${storageSecretName})'
+//       // Needed for EP plans
+//       WEBSITE_CONTENTSHARE: functionAppName
+//       WEBSITE_CONTENTAZUREFILECONNECTIONSTRING: '@Microsoft.KeyVault(VaultName=${keyVault.outputs.name};SecretName=${storageSecretName})'
 
-      // If the storage account is private . . .
-      WEBSITE_CONTENTOVERVNET: 1
+//       // If the storage account is private . . .
+//       WEBSITE_CONTENTOVERVNET: 1
 
-      // WEBSITE_SKIP_CONTENTSHARE_VALIDATE should be set to 1 when using vnet private endpoint
-      // for Azure Storage or when WEBSITE_CONTENTAZUREFILECONNECTIONSTRING uses a
-      // key vault reference. See https://github.com/Azure/azure-functions-host/issues/7094
-      WEBSITE_SKIP_CONTENTSHARE_VALIDATION: 1
+//       // WEBSITE_SKIP_CONTENTSHARE_VALIDATE should be set to 1 when using vnet private endpoint
+//       // for Azure Storage or when WEBSITE_CONTENTAZUREFILECONNECTIONSTRING uses a
+//       // key vault reference. See https://github.com/Azure/azure-functions-host/issues/7094
+//       WEBSITE_SKIP_CONTENTSHARE_VALIDATION: 1
 
-      // Need the settings below if using (user-assigned) identity-based connection for AzureWebJobsStorage or EventHubConnection
-      // EventHubConnection__clientId: uami.properties.clientId
-      // EventHubConnection__credential: 'managedidentity'
-      // AzureWebJobsStorage__accountName: storage.name
-      // AzureWebJobsStorage__credential: 'managedidentity'
-      // AzureWebJobsStorage__clientId: uami.properties.clientId
+//       // Need the settings below if using (user-assigned) identity-based connection for AzureWebJobsStorage or EventHubConnection
+//       // EventHubConnection__clientId: uami.properties.clientId
+//       // EventHubConnection__credential: 'managedidentity'
+//       // AzureWebJobsStorage__accountName: storage.name
+//       // AzureWebJobsStorage__credential: 'managedidentity'
+//       // AzureWebJobsStorage__clientId: uami.properties.clientId
+//     }
+//   }
+// }
 
-    }
-  }
-}
-
-output APPLICATIONINSIGHTS_CONNECTION_STRING string = appInsights.outputs.connectionString
+output APPLICATIONINSIGHTS_CONNECTION_STRING string = monitoring.outputs.applicationInsightsConnectionString //appInsights.outputs.connectionString
 output EVENTHUB_CONSUMER_GROUP_NAME string = eventHub.outputs.EventHubConsumerGroupName
 output EVENTHUB_NAME string = eventHub.outputs.EventHubName
 output EVENTHUB_NAMESPACE string = eventHubNamespace.outputs.eventHubNamespaceName

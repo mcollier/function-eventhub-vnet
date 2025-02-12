@@ -3,17 +3,23 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Azure.Messaging.EventHubs;
-using Microsoft.Azure.WebJobs;
+using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Logging;
 
 namespace EventProducerConsumerSample
 {
     public class EventConsumerFunction
     {
-        [FunctionName("EventHubTrigger")]
-        public static async Task EventHubTriggerFunction(
-            [EventHubTrigger("%EVENTHUB_NAME%", Connection = "EVENTHUB_CONNECTION", ConsumerGroup = "%EVENTHUB_CONSUMER_GROUP_NAME%")] EventData[] events,
-            ILogger log)
+        private readonly ILogger<EventConsumerFunction> _logger;
+
+        public EventConsumerFunction(ILogger<EventConsumerFunction> logger)
+        {
+            _logger = logger;
+        }
+
+        [Function("EventHubTrigger")]
+        public async Task EventHubTriggerFunction(
+            [EventHubTrigger("%EVENTHUB_NAME%", Connection = "EVENTHUB_CONNECTION", ConsumerGroup = "%EVENTHUB_CONSUMER_GROUP_NAME%")] EventData[] events)
         {
             var exceptions = new List<Exception>();
 
@@ -22,7 +28,7 @@ namespace EventProducerConsumerSample
                 try
                 {
                     // Replace these two lines with your processing logic.
-                    log.LogInformation($"C# Event Hub trigger function processed a message: {eventData.EventBody}");
+                    _logger.LogInformation($"C# Event Hub trigger function processed a message: {eventData.EventBody}");
                     await Task.Yield();
                 }
                 catch (Exception e)

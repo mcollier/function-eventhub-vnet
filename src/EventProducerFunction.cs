@@ -1,23 +1,27 @@
-using System;
-using System.Threading.Tasks;
-using Microsoft.Azure.WebJobs;
+using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Logging;
 
 namespace EventProducerConsumerSample
 {
     public class EventProducerFunction
     {
-        [FunctionName("TimerTriggerToEventHub")]
-        public static async Task TimerTriggerToEventHubFunction(
-            [TimerTrigger("0 */5 * * * *")] TimerInfo myTimer,
-            [EventHub("%EVENTHUB_NAME%", Connection = "EVENTHUB_CONNECTION")] IAsyncCollector<string> outputEvents,
-            ILogger log)
+        private readonly ILogger<EventProducerFunction> _logger;
+
+        public EventProducerFunction(ILogger<EventProducerFunction> logger)
+        {
+            _logger = logger;
+        }
+
+        [Function("TimerTriggerToEventHub")]
+        [EventHubOutput("%EVENTHUB_NAME%", Connection = "EVENTHUB_CONNECTION")]
+        public string TimerTriggerToEventHubFunction(
+            [TimerTrigger("0 */1 * * * *")] TimerInfo myTimer)
         {
             string messageBody = $"C# Timer trigger function executed at: {DateTime.Now}";
-            log.LogInformation(messageBody);
+            _logger.LogInformation(messageBody);
 
             // Send message to output Event Hub
-            await outputEvents.AddAsync(messageBody);
+            return messageBody;
         }
     }
 }
