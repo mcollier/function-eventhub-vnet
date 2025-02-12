@@ -46,6 +46,7 @@ var virtualNetworkName = '${abbrs.networkVirtualNetworks}${resourceToken}'
 var virtualNetworkIntegrationSubnetName = '${abbrs.networkVirtualNetworksSubnets}${resourceToken}-int'
 var virtualNetworkPrivateEndpointSubnetName = '${abbrs.networkVirtualNetworksSubnets}${resourceToken}-pe'
 
+var eventHubName = 'widget'
 var eventHubConsumerGroupName = 'widgetfunctionconsumergroup'
 var functionAppName = '${abbrs.webSitesFunctions}${resourceToken}'
 // var storageSecretName = 'storage-connection-string'
@@ -146,14 +147,35 @@ module eventHubSenderRoleUserAssignment 'core/security/role.bicep' = if (!empty(
 //   }
 // }
 
-module monitoring './core/monitor/monitoring.bicep' = {
-  name: 'monitoring'
+// module monitoring './core/monitor/monitoring.bicep' = {
+//   name: 'monitoring'
+//   scope: rg
+//   params: {
+//     logAnalyticsName: '${abbrs.operationalInsightsWorkspaces}${resourceToken}'
+//     applicationInsightsName: '${abbrs.insightsComponents}${resourceToken}'
+//     applicationInsightsDashboardName: ''
+//     includeDashboard: false
+//     location: location
+//     tags: tags
+//   }
+// }
+
+module workspace 'br/public:avm/res/operational-insights/workspace:0.10.0' = {
+  name: 'workspaceDeployment'
   scope: rg
   params: {
-    logAnalyticsName: '${abbrs.operationalInsightsWorkspaces}${resourceToken}'
-    applicationInsightsName: '${abbrs.insightsComponents}${resourceToken}'
-    applicationInsightsDashboardName: ''
-    includeDashboard: false
+    name: '${abbrs.operationalInsightsWorkspaces}${resourceToken}'
+    location: location
+    tags: tags
+  }
+}
+
+module applicationInsightsComponent 'br/public:avm/res/insights/component:0.6.0' = {
+  name: 'appInsightsComponent'
+  scope: rg
+  params: {
+    name: '${abbrs.insightsComponents}${resourceToken}'
+    workspaceResourceId: workspace.outputs.resourceId
     location: location
     tags: tags
   }
@@ -183,60 +205,104 @@ module monitoring './core/monitor/monitoring.bicep' = {
 //   }
 // }
 
-module storage './core/storage/storage-account.bicep' = {
-  name: 'storage'
+// module storage './core/storage/storage-account.bicep' = {
+//   name: 'storage'
+//   scope: rg
+//   params: {
+//     name: '${abbrs.storageStorageAccounts}${resourceToken}'
+//     location: location
+//     tags: tags
+//     containers: [
+//       {
+//         name: deploymentStorageContainerName
+//       }
+//     ]
+
+//     // fileShares: [
+//     //   {
+//     //     name: functionAppName
+//     //   }
+//     // ]
+
+//     // Set the key vault name to set the connection string as a secret in the key vault.
+//     // keyVaultName: keyVault.outputs.name
+//     // keyVaultSecretName: storageSecretName
+
+//     useVirtualNetworkPrivateEndpoint: useVirtualNetworkPrivateEndpoint
+//   }
+// }
+
+// TODO: Set up for private endpoint.
+module storageAccount 'br/public:avm/res/storage/storage-account:0.17.2' = {
+  name: 'storageAccountDeployment'
   scope: rg
   params: {
     name: '${abbrs.storageStorageAccounts}${resourceToken}'
     location: location
     tags: tags
-
-    // fileShares: [
-    //   {
-    //     name: functionAppName
-    //   }
-    // ]
-
-    // Set the key vault name to set the connection string as a secret in the key vault.
-    // keyVaultName: keyVault.outputs.name
-    // keyVaultSecretName: storageSecretName
-
-    useVirtualNetworkPrivateEndpoint: useVirtualNetworkPrivateEndpoint
+    blobServices: {
+      containers: [
+        {
+          name: deploymentStorageContainerName
+        }
+      ]
+    }
   }
 }
 
-module eventHubNamespace './core/messaging/event-hub-namespace.bicep' = {
-  name: 'eventHubNamespace'
+// TODO: Set up for private endpoint.
+module eventHubNamespace 'br/public:avm/res/event-hub/namespace:0.10.0' = {
+  name: 'eventHubNamespaceDeployment'
   scope: rg
   params: {
     name: '${abbrs.eventHubNamespaces}${resourceToken}'
     location: location
-    tags: tags
-
-    sku: 'Standard'
-
-    useVirtualNetworkPrivateEndpoint: useVirtualNetworkPrivateEndpoint
+    skuName: 'Standard'
+    eventhubs: [
+      {
+        name: eventHubName
+        consumerGroups: [
+          {
+            name: eventHubConsumerGroupName
+          }
+        ]
+      }
+    ]
   }
 }
 
-module eventHub './core/messaging/event-hub.bicep' = {
-  name: 'eventHub'
-  scope: rg
-  params: {
-    name: '${abbrs.eventHubNamespacesEventHubs}widget'
-    eventHubNamespaceName: eventHubNamespace.outputs.eventHubNamespaceName
-    consumerGroupName: eventHubConsumerGroupName
-  }
-}
+// module eventHubNamespace './core/messaging/event-hub-namespace.bicep' = {
+//   name: 'eventHubNamespace'
+//   scope: rg
+//   params: {
+//     name: '${abbrs.eventHubNamespaces}${resourceToken}'
+//     location: location
+//     tags: tags
+
+//     sku: 'Standard'
+
+//     useVirtualNetworkPrivateEndpoint: useVirtualNetworkPrivateEndpoint
+//   }
+// }
+
+// module eventHub './core/messaging/event-hub.bicep' = {
+//   name: 'eventHub'
+//   scope: rg
+//   params: {
+//     name: '${abbrs.eventHubNamespacesEventHubs}widget'
+//     eventHubNamespaceName: eventHubNamespace.outputs.eventHubNamespaceName
+//     consumerGroupName: eventHubConsumerGroupName
+//   }
+// }
 
 module flexFunction 'core/host/function.bicep' = {
   name: 'flexFunction'
   scope: rg
   params: {
     location: location
-    tags: tags
-    applicationInsightsName: monitoring.outputs.applicationInsightsName
-    storageAccountName: storage.outputs.name
+    tags: union(tags, { 'azd-service-name': 'event-consumer-func' })
+    applicationInsightsName: applicationInsightsComponent.outputs.name
+    storageAccountName: storageAccount.outputs.name //storage.outputs.name
     appName: functionAppName
     deploymentStorageContainerName: deploymentStorageContainerName
     planName: '${abbrs.webServerFarms}${resourceToken}'
@@ -244,6 +310,7 @@ module flexFunction 'core/host/function.bicep' = {
     functionAppRuntimeVersion: '9.0'
     instanceMemoryMB: functionInstanceMemoryMB
     maximumInstanceCount: functionMaxInstanceCount
+    serviceName: 'event-consumer-func'
   }
 }
 
@@ -319,9 +386,9 @@ module networking 'core/networking/private-networking.bicep' = if (useVirtualNet
   scope: rg
   params: {
     location: location
-    eventHubNamespaceName: eventHubNamespace.outputs.eventHubNamespaceName
+    eventHubNamespaceName: eventHubNamespace.outputs.name //eventHubNamespace.outputs.eventHubNamespaceName
     // keyVaultName: keyVault.outputs.name
-    storageAccoutnName: storage.outputs.name
+    storageAccoutnName: storageAccount.outputs.name //storage.outputs.name
     functionName: flexFunction.outputs.name
     virtualNetworkIntegrationSubnetName: virtualNetworkIntegrationSubnetName
     virtualNetworkName: virtualNetworkName
@@ -392,8 +459,8 @@ module networking 'core/networking/private-networking.bicep' = if (useVirtualNet
 //   }
 // }
 
-output APPLICATIONINSIGHTS_CONNECTION_STRING string = monitoring.outputs.applicationInsightsConnectionString //appInsights.outputs.connectionString
-output EVENTHUB_CONSUMER_GROUP_NAME string = eventHub.outputs.EventHubConsumerGroupName
-output EVENTHUB_NAME string = eventHub.outputs.EventHubName
-output EVENTHUB_NAMESPACE string = eventHubNamespace.outputs.eventHubNamespaceName
-output EVENTHUB_CONNECTION__fullyQualifiedNamespace string = '${eventHubNamespace.outputs.eventHubNamespaceName}.servicebus.windows.net'
+output APPLICATIONINSIGHTS_CONNECTION_STRING string = applicationInsightsComponent.outputs.connectionString //appInsights.outputs.connectionString
+output EVENTHUB_CONSUMER_GROUP_NAME string = eventHubConsumerGroupName
+output EVENTHUB_NAME string = eventHubName
+output EVENTHUB_NAMESPACE string = eventHubNamespace.outputs.name //eventHubNamespace.outputs.eventHubNamespaceName
+output EVENTHUB_CONNECTION__fullyQualifiedNamespace string = '${eventHubNamespace.outputs.name}.servicebus.windows.net' //'${eventHubNamespace.outputs.eventHubNamespaceName}.servicebus.windows.net'
